@@ -1,0 +1,148 @@
+#!/bin/bash
+
+set -o errexit -o nounset
+
+###########
+# Variables
+###########
+
+declare -r script_root="$(cd "$(dirname "$0")" && pwd)"
+declare -r script_name="$(basename "$0")"
+
+###########
+# Functions
+###########
+
+# TODO (DANOBLE) Read and reference the Roonlabs license in the usage text.
+
+function usage {
+
+    echo "NAME"
+    echo "       ${script_name} - installs, configures, and starts a Roon server"
+    echo ""
+    echo "SYNOPSIS"
+    echo "       ${script_name} [--package <address>] [--prefix <path>] [--help]"
+    echo ""
+    echo "DESCRIPTION"
+    echo "       ${script_name} first checks to see if a Roon server is installed. If not, it downloads the Roon"
+    echo "       server package for Linux AMD64 from the specified package address and installs it at the given"
+    echo "       prefix path. It then updates ROON_DATAROOT and ROON_ID_DIR in /etc/systemd/system/roonserver.service."
+    echo ""
+    echo "       ${script_name} then starts the Roon service. Subsequently we recommend that you manage the Roon"
+    echo "       service using systemctl."
+    echo ""
+    echo "       ${script_name} requires root privileges. It is especially useful when starting the Roon service in a"
+    echo "       container. The first time it runs, Roon is installed, configured, and started. On subquent runs, it"
+    echo "       need only start the service."
+    echo ""
+    echo "       WARNING: The Roonlabs license forbids archiving, packaging, and distributing Roon in any format."
+    echo "       ${script_name} is intended for use by licensed Roon users only. One must never distribute a container"
+    echo "       image that includes Roon binaries."
+    echo ""
+    echo "OPTIONS"
+    echo "       -h|--help"
+    echo "           Prints this usage text and exits."
+    echo ""
+    echo "       --package"
+    echo "           Download address. Common addresses are file, ftp, and http locations."
+    echo "           Default: https://download.roonlabs.net/builds/RoonServer_linuxx64.tar.bz2"
+    echo ""
+    echo "       --prefix"
+    echo "           Specifies where Roon Server should be installed."
+    echo "           Default: /opt/local"
+    echo ""
+    exit 0
+}
+
+function error {
+    echo "[$(date --iso-8601=seconds)] ${script_name} error: $2" 1>&2
+    exit $1
+}
+
+function note {
+    echo "[$(date --iso-8601=seconds)] ${script_name} note: $1" 1>&2
+}
+
+if [[ $EUID -ne 0 ]]; then
+    error 1 "Must run as root."
+fi
+
+###########
+# Arguments
+###########
+
+declare -r args=$(getopt --name "$script_name" --options "h" --longoptions "help,package:,prefix:" -- $* || echo exit)
+eval set -- "$args"
+
+while [[ $1 != '--' ]]; do
+    case $1 in
+    -h|--help)
+        usage; # does not return
+        shift 1
+        ;;
+    --package)
+        declare -r package="$2"
+        shift 2
+        ;;
+    --prefix)
+        declare -r prefix="$2"
+        shift 2
+        ;;
+    *)
+        error 1 "Unrecognized option: $1"
+        ;;
+  esac
+
+done
+
+[[ -n ${package:-} ]] || declare -r package='https://download.roonlabs.net/builds/RoonServer_linuxx64.tar.bz2'
+[[ -n ${prefix:-} ]] || declare -r prefix='/opt/local'
+
+# Setup directory structure
+
+declare -r roon_server_location="$prefix/share/roon"
+
+if mkdir -p $roon_server_location && [[ -r $roon_server_location ]] && [[ -w $roon_server_location ]]; then
+    note "Roon server is at '$roon_server_location'"
+else
+    error "Failed to create a read/write Roon server directory at '$roon_server_location'"
+fi
+
+declare -r roon_data_location=$prefix/var/roon
+
+if mkdir -p $roon_data_location && [[ -r $roon_data_location ]] && [[ -w $roon_data_location ]]; then
+    note "Roon data is at '$roon_data_location'"
+else
+    error "Failed to create a read/write Roon data directory at '$roon_data_location'"
+fi
+
+# Check for shared folders which cause all kinds of weird errors on core updates
+
+rm -f $roon_data_location/check-for-shared-with-data
+touch $roon_server_location/check-for-shared-with-data
+
+if [[ -f $roon_data_location/check-for-shared-with-data ]]; then
+    error "Roon server directory '$roon_server_location' and Roon data directory '$roon_data_location' refer to the same location. You will need to fix this."
+fi
+
+rm -f $roon_server_location/check-for-shared-with-data
+
+# Optionally download and install Roon
+
+cd $roon_server_location
+
+if [[ ! -d RoonServer ]]; then
+    curl --location "${package}" --output "${package##*/}"
+    tar -xjf "${package##*/}"
+    rm -f "${package}"
+fi
+
+# Start roon server
+## TODO (DANOBLE) set these environment variables in /etc/systemd/system/roonserver.service
+## Rationale: We can subsequently use systemctl to start and stop the service without worries.
+## Reference: https://community.roonlabs.com/t/roon-dataroot-where-to-set/35731/5
+
+export ROON_DATAROOT="${roon_data_location}"
+export ROON_ID_DIR="${roon_data_location}"
+
+"$roon_server_location/RoonServer/start.sh"
