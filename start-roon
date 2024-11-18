@@ -98,43 +98,52 @@ done
 [[ -n ${package:-} ]] || declare -r package='https://download.roonlabs.net/builds/RoonServer_linuxx64.tar.bz2'
 [[ -n ${prefix:-} ]] || declare -r prefix='/opt/local'
 
-# Setup directory structure
-
 declare -r roon_server_location="$prefix/share/roon"
+declare -r roon_data_location="$prefix/var/roon"
 
-if mkdir -p $roon_server_location && [[ -r $roon_server_location ]] && [[ -w $roon_server_location ]]; then
-    note "Roon server is at '$roon_server_location'"
-else
-    error "Failed to create a read/write Roon server directory at '$roon_server_location'"
-fi
+###########
+# Main
+###########
 
-declare -r roon_data_location=$prefix/var/roon
+# Install and configure roonserver if systemctl tells us that the roonserver.service unit is absent
 
-if mkdir -p $roon_data_location && [[ -r $roon_data_location ]] && [[ -w $roon_data_location ]]; then
-    note "Roon data is at '$roon_data_location'"
-else
-    error "Failed to create a read/write Roon data directory at '$roon_data_location'"
-fi
+if ! systemctl list-unit-files apt-daily.service >/dev/null; then
 
-# Check for shared folders which cause all kinds of weird errors on core updates
+    # Setup directory structure
 
-rm -f $roon_data_location/check-for-shared-with-data
-touch $roon_server_location/check-for-shared-with-data
+    if mkdir -p $roon_server_location 2> /dev/null && [[ -r $roon_server_location ]] && [[ -w $roon_server_location ]]; then
+        note "Roon server is at '$roon_server_location'"
+    else
+        error "Failed to create a read/write Roon server directory at '$roon_server_location'"
+    fi
 
-if [[ -f $roon_data_location/check-for-shared-with-data ]]; then
-    error "Roon server directory '$roon_server_location' and Roon data directory '$roon_data_location' refer to the same location. You will need to fix this."
-fi
+    if mkdir -p $roon_data_location 2> /dev/null && [[ -r $roon_data_location ]] && [[ -w $roon_data_location ]]; then
+        note "Roon data is at '$roon_data_location'"
+    else
+        error "Failed to create a read/write Roon data directory at '$roon_data_location'"
+    fi
 
-rm -f $roon_server_location/check-for-shared-with-data
+    # Ensure that the code and data directories don't refer to the same locations because this causes update errors
 
-# Optionally download and install Roon
+    rm -f $roon_data_location/check-for-shared-with-data
+    touch $roon_server_location/check-for-shared-with-data
 
-cd $roon_server_location
+    if [[ -f $roon_data_location/check-for-shared-with-data ]]; then
+        error "Roon server directory '$roon_server_location' and Roon data directory '$roon_data_location' refer to the same location. You will need to fix this."
+    fi
 
-if [[ ! -d RoonServer ]]; then
+    rm -f $roon_server_location/check-for-shared-with-data
+    
+    # Download and install Roon Server
+
+    cd $roon_server_location
+    rm -rf *
+
     curl --location "${package}" --output "${package##*/}"
     tar -xjf "${package##*/}"
-    rm -f "${package}"
+    rm -f "${package##*/}"
+
+    RoonServer/check.sh    
 fi
 
 # Start roon server
