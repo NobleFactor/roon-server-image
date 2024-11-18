@@ -24,20 +24,22 @@ function usage {
     echo "       ${script_name} [--package <address>] [--prefix <path>] [--help]"
     echo ""
     echo "DESCRIPTION"
-    echo "       ${script_name} first checks to see if a Roon server is installed. If not, it downloads the Roon"
-    echo "       server package for Linux AMD64 from the specified package address and installs it at the given"
-    echo "       prefix path. It then updates ROON_DATAROOT and ROON_ID_DIR in /etc/systemd/system/roonserver.service."
+    echo "       ${script_name} requires root privileges. It is especially useful when running the Roon Server service in"
+    echo "       a container. The first time it runs, roonserver is installed, configured, and started. On subquent runs,"
+    echo "       it will detect the installation and simply start the service; nothing more."
     echo ""
-    echo "       ${script_name} then starts the Roon service. Subsequently we recommend that you manage the Roon"
-    echo "       service using systemctl."
+    echo "       Execution proceeds as follows. ${script_name} first checks to see if a Roon server is installed. If not,"
+    echo "       it downloads the Roon Server package for Linux AMD64 from the specified package address, and then"
+    echo "       installs it on the given prefix path. Next, it creates a roonserver.service file at:"
     echo ""
-    echo "       ${script_name} requires root privileges. It is especially useful when starting the Roon service in a"
-    echo "       container. The first time it runs, Roon is installed, configured, and started. On subquent runs, it"
-    echo "       need only start the service."
+    echo "           lib/systemd/system/roonserver.service"
     echo ""
-    echo "       WARNING: The Roonlabs license forbids archiving, packaging, and distributing Roon in any format."
-    echo "       ${script_name} is intended for use by licensed Roon users only. One must never distribute a container"
-    echo "       image that includes Roon binaries."
+    echo "       on the prefix path, and creates a symbolic link to it on:"
+    echo ""
+    echo "           /etc/systemd/system/roonserver.service"
+    echo ""
+    echo "       Finally, ${script_name} enables and starts roonserver.service. Following the first run we recommend"
+    echo "       managing the roonserver service with systemctl."
     echo ""
     echo "OPTIONS"
     echo "       -h|--help"
@@ -51,20 +53,49 @@ function usage {
     echo "           Specifies where Roon Server should be installed."
     echo "           Default: /opt/local"
     echo ""
+    echo "LEGAL NOTICE"
+    echo "       ${script_name} is distributed for personal use by Roon Server licensees. Roon Server licensees may modify"
+    echo "       and distribute ${script_name}, but may not use it to package and distribute Roon Server. The Roonlabs EULA"
+    echo "       forbids distributing Roon Server in any format."
+    echo ""
     exit 0
 }
 
+function cleanup_after_installation_error {
+    systemctl stop "$roon_server_name" 2>&1 > /dev/null | true
+    rm -rf \
+        "$roon_apps_location" \
+        "$roon_data_location" \
+        "$roon_service_path" \
+        "/etc/systemd/system/${roon_service_name}"
+}
+
 function error {
-    echo "[$(date --iso-8601=seconds)] ${script_name} error: $2" 1>&2
-    exit $1
+    local exit_code=$1 && shift 1
+    echo "[$(date --iso-8601=seconds)] ${script_name} error: $@" 1>&2
+    exit $exit_code
 }
 
 function note {
-    echo "[$(date --iso-8601=seconds)] ${script_name} note: $1" 1>&2
+    echo "[$(date --iso-8601=seconds)] ${script_name} note: $@" 1>&2
 }
+
+###################
+# Prerequsite check
+###################
+
+declare arch=$(uname -m)
+
+if [[ $arch != x86_64 ]]; then
+    error 1 "Requires x86_64, not $arch."
+fi
 
 if [[ $EUID -ne 0 ]]; then
     error 1 "Must run as root."
+fi
+
+if ! which systemctl >/dev/null || [[ ! -d /etc/systemd/system ]]; then
+    error 1 "Must install systemctl."
 fi
 
 ###########
@@ -98,60 +129,112 @@ done
 [[ -n ${package:-} ]] || declare -r package='https://download.roonlabs.net/builds/RoonServer_linuxx64.tar.bz2'
 [[ -n ${prefix:-} ]] || declare -r prefix='/opt/local'
 
-declare -r roon_server_location="$prefix/share/roon"
-declare -r roon_data_location="$prefix/var/roon"
+declare -r roon_apps_location="${prefix}/share/roon"
+declare -r roon_backup_location="${prefix}/var/roon/backup"
+declare -r roon_data_location="${prefix}/var/roon/data"
+declare -r roon_music_location="${prefix}/var/roon/music"
 
-###########
+declare -r roon_server_name="roonserver"
+declare -r roon_server_path="${roon_apps_location}/${roon_server_name}"
+
+declare -r system_location="${prefix}/lib/systemd/system"
+declare -r roon_service_name="${roon_server_name}.service"
+declare -r roon_service_path="${system_location}/${roon_service_name}"
+
+######
 # Main
-###########
+######
 
 # Install and configure roonserver if systemctl tells us that the roonserver.service unit is absent
 
-if ! systemctl list-unit-files apt-daily.service >/dev/null; then
+if ! systemctl list-unit-files "${roon_service_name}" >/dev/null; then
+
+    trap cleanup_after_installation_error_or_interrupt ERR SIGINT SIGKILL SIGTERM
 
     # Setup directory structure
 
-    if mkdir -p $roon_server_location 2> /dev/null && [[ -r $roon_server_location ]] && [[ -w $roon_server_location ]]; then
-        note "Roon server is at '$roon_server_location'"
+    if mkdir -p $roon_apps_location 2> /dev/null && [[ -r $roon_apps_location ]] && [[ -w $roon_apps_location ]]; then
+        note "Roon Server is at '$roon_server_path'"
     else
-        error "Failed to create a read/write Roon server directory at '$roon_server_location'"
+        error 1 "Failed to create read/write Roon Server directory at '$roon_server_path'"
+    fi
+
+    if mkdir -p $system_location 2> /dev/null && [[ -r $system_location ]] && [[ -w $system_location ]]; then
+        note "Roon Server service unit is at '$system_location'"
+    else
+        error 1 "Failed to create read/write System directory for Roon Server service unit at '$system_location'"
+    fi
+    
+    if mkdir -p $roon_backup_location 2> /dev/null && [[ -r $roon_backup_location ]] && [[ -w $roon_backup_location ]]; then
+        note "Roon backup is at '$roon_backup_location'"
+    else
+        error 1 "Failed to create read/write Roon backup directory at '$roon_data_location'"
     fi
 
     if mkdir -p $roon_data_location 2> /dev/null && [[ -r $roon_data_location ]] && [[ -w $roon_data_location ]]; then
         note "Roon data is at '$roon_data_location'"
     else
-        error "Failed to create a read/write Roon data directory at '$roon_data_location'"
+        error 1 "Failed to create read/write Roon data directory at '$roon_data_location'"
     fi
 
-    # Ensure that the code and data directories don't refer to the same locations because this causes update errors
+    if mkdir -p $roon_music_location 2> /dev/null && [[ -r $roon_music_location ]] && [[ -w $roon_music_location ]]; then
+        note "Roon music is at '$roon_music_location'"
+    else
+        error 1 "Failed to create read/write Roon music directory at '$roon_music_location'"
+    fi
 
     rm -f $roon_data_location/check-for-shared-with-data
-    touch $roon_server_location/check-for-shared-with-data
+    touch $roon_apps_location/check-for-shared-with-data
 
     if [[ -f $roon_data_location/check-for-shared-with-data ]]; then
-        error "Roon server directory '$roon_server_location' and Roon data directory '$roon_data_location' refer to the same location. You will need to fix this."
+
+        target=readlink --canonicalize-existing "${roon_data_location}"
+        
+        error 1 "Roon data and server directories cannot refer to the same location as this causes update issues."
+            "Address the problem by mounting these directories differently:"
+            "$(find "$(findmnt -o TARGET -cenT "$target")" -mount -samefile "$target")"
     fi
 
-    rm -f $roon_server_location/check-for-shared-with-data
+    rm -f "${roon_apps_location}/check-for-shared-with-data"
     
     # Download and install Roon Server
 
-    cd $roon_server_location
-    rm -rf *
+    cd $roon_apps_location
+    rm -rf "${roon_server_name}"
 
-    curl --location "${package}" --output "${package##*/}"
+    curl --location "${package}" --output "${package##*/}" --progress-bar
     tar -xjf "${package##*/}"
     rm -f "${package##*/}"
 
-    RoonServer/check.sh    
+    RoonServer/check.sh
+    mv RoonServer "${roon_server_name}"
+
+    # Create service unit
+
+    cat > "${roon_service_path}" << END_SERVICE_UNIT
+[Unit]
+Description=${roon_server_name}
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+Environment=ROON_DATAROOT="${prefix}/var/roon"
+Environment=ROON_ID_DIR="${prefix}/var/roon"
+ExecStart="${roon_server_path}/start.sh"
+Restart=on-abort
+
+[Install]
+WantedBy=multi-user.target
+END_SERVICE_UNIT
+
+    ln --force --symbolic "${roon_service_path}" "/etc/systemd/system/${roon_service_name}"
+    trap - ERR SIGINT SIGKILL SIGTERM
 fi
 
-# Start roon server
-## TODO (DANOBLE) set these environment variables in /etc/systemd/system/roonserver.service
-## Rationale: We can subsequently use systemctl to start and stop the service without worries.
-## Reference: https://community.roonlabs.com/t/roon-dataroot-where-to-set/35731/5
+if ! systemctl is-enabled "${roon_service_name}" > /dev/null; then
+    systemctl enable "${roon_service_name}"
+fi
 
-export ROON_DATAROOT="${roon_data_location}"
-export ROON_ID_DIR="${roon_data_location}"
-
-"$roon_server_location/RoonServer/start.sh"
+systemctl start "${roon_service_name}"
+systemctl status "${roon_service_name}" 
