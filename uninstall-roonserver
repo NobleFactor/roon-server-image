@@ -15,7 +15,6 @@ set -o errexit -o nounset
 
 declare -r script_root="$(cd "$(dirname "$0")" && pwd)"
 declare -r script_name="$(basename "$0")"
-declare arch=$(uname -m)
 
 ###########
 # Functions
@@ -71,15 +70,17 @@ if [[ $EUID -ne 0 ]]; then
     error 1 "Must run as root."
 fi
 
+declare arch=$(uname -m)
+
 if [[ $arch != x86_64 ]]; then
     error 1 "Requires x86_64, not $arch."
 fi
 
-if ! which systemctl; then
+if ! which systemctl >/dev/null; then
     error 1 "Requires systemctl on PATH."
 fi
 
-if ! which systemctl list-unit-files roonserver.service >/dev/null; then
+if ! systemctl list-unit-files roonserver.service >/dev/null; then
     error 1 "Roon Server is not installed."
 fi
 
@@ -111,31 +112,35 @@ done
 # Main
 ######
 
-declare -rA roon_environment=$(systemctl show roonserver --property Environment | cut -f2- -d= | sed 's/ROON_\([^ \t]*\)=/[ROON_\1]=/g')
+eval declare -A roon_environment=$(echo "( $(systemctl show roonserver --property Environment | cut -f2- -d= | sed 's/ROON_\([^ \t]*\)=/[ROON_\1]=/g') )")
 
-declare -r roon_server_root=${roon_environment[ROON_SERVER_ROOT]}
+declare -r roon_server_root="${roon_environment[ROON_SERVER_ROOT]}"
 
-if [[ -z $roon_server_root ]]  [[ ! -d $roon_server_root ]]; then
+if [[ -z $roon_server_root ]] || [[ ! -d $roon_server_root ]]; then
     error 1 \
         "Excepted the name of a directory for ROON_SERVER_ROOT, not '$roon_server_root'. (1) Correct the value of 'Environment=ROON_SERVER_ROOT' in" \
         "/etc/systemd/system/roonserver.service; (2) Issue this command: sudo systemctl daemon-reload. (3) Then try running ${script_name} again."
 fi
 
-declare -r roon_server_root=${roon_environment[ROON_DATAROOT]}
+declare -r roon_dataroot=${roon_environment[ROON_DATAROOT]}
 
-if [[ -z $roon_dataroot ]]  [[ ! -d $roon_dataroot ]]; then
+if [[ -z $roon_dataroot ]] ||  [[ ! -d $roon_dataroot ]]; then
     error 1 \
         "Excepted the name of a directory for ROON_DATAROOT, not '$roon_dataroot'. (1) Correct the value of 'Environment=ROON_DATAROOT' in" \
         "/etc/systemd/system/roonserver.service; (2) Issue this command: sudo systemctl daemon-reload. (3) Then try running ${script_name} again."
 fi
 
-if [[ -f "${roon_server_root}/check" ]] && "${roon_server_root}/check"; then
+if [[ -f "${roon_server_root}/check.sh" ]] && "${roon_server_root}/check.sh"; then
 
-    rm -rf "${roon_server_root}"
-    rm -f $(readlink --canonicalize-existing /etc/systemd/system/roonserver.service) /etc/systemd/system/roonserver.service
+    note "Uninstalling Roon Server at '${roon_server_root}'"
+    systemctl stop roonserver
+
+    rm --verbose --recursive --dir "${roon_server_root}"
+    rm --verbose $(readlink --canonicalize-existing /etc/systemd/system/roonserver.service) /etc/systemd/system/roonserver.service
 
     if [[ remove_data == true ]]; then
-        rm -rf "${roon_dataroot}"
+        note "Removing Roon data at '${roon_dataroot}'"
+        rm --verbose --recursive --dir "${roon_dataroot}"
     fi
 else
     error 1 \
