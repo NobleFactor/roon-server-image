@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# TODO (DANOBLE) Complete copyright notice and reference SPDX document that references MIT and Roon software terms and conditions
+
+#################################################
+# Copyright
+# SPDX Document reference
+#################################################
+
 set -o errexit -o nounset
 
 ###########
@@ -17,8 +24,9 @@ declare -r script_name="$(basename "$0")"
 
 function usage {
 
+    echo ""
     echo "NAME"
-    echo "       ${script_name} - installs, configures, and starts a Roon server"
+    echo "       ${script_name} - installs, configures, and starts Roon Server"
     echo ""
     echo "SYNOPSIS"
     echo "       ${script_name} [--package <address>] [--prefix <path>] [--help]"
@@ -86,16 +94,16 @@ function note {
 
 declare arch=$(uname -m)
 
-if [[ $arch != x86_64 ]]; then
-    error 1 "Requires x86_64, not $arch."
-fi
-
 if [[ $EUID -ne 0 ]]; then
     error 1 "Must run as root."
 fi
 
+if [[ $arch != x86_64 ]]; then
+    error 1 "Requires x86_64, not $arch."
+fi
+
 if ! which systemctl >/dev/null || [[ ! -d /etc/systemd/system ]]; then
-    error 1 "Must install systemctl."
+    error 1 "Requires systemctl on PATH."
 fi
 
 ###########
@@ -219,6 +227,7 @@ After=network-online.target
 [Service]
 Type=simple
 User=root
+Environment=ROON_SERVER_ROOT="${roon_server_path}"
 Environment=ROON_DATAROOT="${prefix}/var/roon"
 Environment=ROON_ID_DIR="${prefix}/var/roon"
 ExecStart="${roon_server_path}/start.sh"
