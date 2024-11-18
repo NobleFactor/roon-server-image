@@ -133,15 +133,17 @@ fi
 if [[ -f "${roon_server_root}/check.sh" ]] && "${roon_server_root}/check.sh"; then
 
     note "Uninstalling Roon Server at '${roon_server_root}'"
+    
     systemctl stop roonserver
-
-    rm --verbose --recursive --dir "${roon_server_root}"
-    rm --verbose $(readlink --canonicalize-existing /etc/systemd/system/roonserver.service) /etc/systemd/system/roonserver.service
+    rm --recursive --dir "${roon_server_root}"
+    rm $(readlink --canonicalize-existing /etc/systemd/system/roonserver.service) /etc/systemd/system/roonserver.service
 
     if [[ remove_data == true ]]; then
         note "Removing Roon data at '${roon_dataroot}'"
-        rm --verbose --recursive --dir "${roon_dataroot}"
+        rm --recursive --dir "${roon_dataroot}"
     fi
+    
+    note "Complete."
 else
     error 1 \
         "The check for a runnable instance of Roon Server at '$roon_server_root' failed. To resolve the issue, check" \
