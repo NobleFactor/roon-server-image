@@ -9,6 +9,6 @@ ENV PACKAGE https://download.roonlabs.net/builds/RoonServer_linuxx64.tar.bz2
 ENV PREFIX /opt/local
 
 VOLUME [ "${PREFIX}/share/roon-server", "${PREFIX}/var/roon-server/data", "${PREFIX}/var/roon-server/music", "${PREFIX}/var/roon-server/backup" ]
-ADD start-container /
+ADD start-roonserver /
 
-ENTRYPOINT /start-roon --package ${PACKAGE} --prefix ${PREFIX}
+ENTRYPOINT /start-roonserver --package ${PACKAGE} --prefix ${PREFIX}
