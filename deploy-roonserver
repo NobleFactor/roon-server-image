@@ -249,19 +249,18 @@ if ! systemctl list-unit-files "${roon_service_name}" >/dev/null; then
             "$(find "$(findmnt -o TARGET -cenT "$target")" -mount -samefile "$target")"
     fi
 
-    rm -f "${roon_serverroot}/check-for-common-target-directory"
-    
-    note "Downloading and unpacking ${package}"
+    note "Downloading and unpacking Roon Server from '${package}' to '${roon_serverroot}'"
 
-    cd $roon_approot
-    rm -rf "${roon_server_name}"
-
+    cd "${roon_approot}"
+    rm -rf "${roon_server_name}"/*
     curl --location "${package}" --output "${package##*/}" --progress-bar
-    tar -xjf "${package##*/}"
-    rm -f "${package##*/}"
+    tar -xjf "${package##*/}" --directory ${roon_server_name} --strip-components=1
 
-    RoonServer/check.sh
-    mv RoonServer "${roon_server_name}"
+    # Check installation and clean up
+
+    [[ -f "${roon_server_name}/check.sh" ]] || error 1 "Cannot check installation because '${roon_server_name}/check.sh' is missing."
+    "${roon_server_name}/check.sh"
+    rm -f "${package##*/}"
 
     # Create service unit
 

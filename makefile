@@ -9,10 +9,13 @@ PROJECT_ROOT := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))$(PROJECT_ROOT)
 DOCKER_NAMESPACE := noblefactor
 DOCKER_REPOSITORY := roonserver
 DOCKER_TAG := 1.0.0-preview.1
+DOCKER_CONTAINER := $(DOCKER_REPOSITORY)
 
 export IMAGE := $(DOCKER_NAMESPACE)/$(DOCKER_REPOSITORY):$(DOCKER_TAG)
 
 image:
+	docker container rm --force $(DOCKER_CONTAINER)
+	docker image rm --force $(DOCKER_NAMESPACE)/$(DOCKER_REPOSITORY):$(DOCKER_TAG)
 	docker buildx build --platform linux/amd64 --tag $(IMAGE) $(PROJECT_ROOT)
 
 container:

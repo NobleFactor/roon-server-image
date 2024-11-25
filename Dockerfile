@@ -28,7 +28,6 @@ apt-get -y install bash curl bzip2 ffmpeg cifs-utils alsa-utils libicu74
 EOF
 
 ADD deploy-roonserver /
-ADD uninstall-roonserver "${ROON_SERVERROOT}"
 
 VOLUME [\
  "${ROON_DATAROOT}/data",\
