@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# TODO (DANOBLE) Complete copyright notice and reference SPDX document that references MIT and Roon software terms and conditions
-
 #################################################
-# Copyright
+# Copyright (c) 2024 Noble Factor
 # SPDX Document reference
-#################################################
+#############################################
+
+# TODO (DANOBLE) Reference SPDX document that references MIT and Roon software terms and conditions.
 
 set -o errexit -o nounset
 
@@ -43,15 +43,6 @@ function usage {
     exit 0
 }
 
-function cleanup_after_installation_error {
-    systemctl stop "$roon_server_name" 2>&1 > /dev/null | true
-    rm -rf \
-        "$roon_apps_location" \
-        "$roon_data_location" \
-        "$roon_service_path" \
-        "/etc/systemd/system/${roon_service_name}"
-}
-
 function error {
     local exit_code=$1 && shift 1
     echo "[$(date --iso-8601=seconds)] ${script_name} error: $@" 1>&2
@@ -60,6 +51,10 @@ function error {
 
 function note {
     echo "[$(date --iso-8601=seconds)] ${script_name} note: $@" 1>&2
+}
+
+function on_error_or_interrupt {
+    note "Failed: The state of the Roon Server on '${roon_serverroot}' is uncertain."
 }
 
 ###################
@@ -114,39 +109,38 @@ done
 
 eval declare -A roon_environment=$(echo "( $(systemctl show roonserver --property Environment | cut -f2- -d= | sed 's/ROON_\([^ \t]*\)=/[ROON_\1]=/g') )")
 
-declare -r roon_server_root="${roon_environment[ROON_SERVER_ROOT]}"
+declare -r roon_serverroot="${roon_environment[ROON_SERVERROOT]}"
+declare -r roon_dataroot="${roon_environment[ROON_DATAROOT]}"
 
-if [[ -z $roon_server_root ]] || [[ ! -d $roon_server_root ]]; then
+if [[ -z $roon_serverroot ]] || [[ ! -d $roon_serverroot ]]; then
     error 1 \
-        "Excepted the name of a directory for ROON_SERVER_ROOT, not '$roon_server_root'. (1) Correct the value of 'Environment=ROON_SERVER_ROOT' in" \
-        "/etc/systemd/system/roonserver.service; (2) Issue this command: sudo systemctl daemon-reload. (3) Then try running ${script_name} again."
+        "Excepted the name of a directory for ROON_SERVERROOT, not '$roon_serverroot'. (1) Correct the value of 'Environment=ROON_SERVERROOT' in" \
+        "/etc/systemd/system/roonserver.service; (2) Issue this command: sudo systemctl daemon-reload. (3) Then run ${script_name} again."
 fi
-
-declare -r roon_dataroot=${roon_environment[ROON_DATAROOT]}
 
 if [[ -z $roon_dataroot ]] ||  [[ ! -d $roon_dataroot ]]; then
     error 1 \
         "Excepted the name of a directory for ROON_DATAROOT, not '$roon_dataroot'. (1) Correct the value of 'Environment=ROON_DATAROOT' in" \
-        "/etc/systemd/system/roonserver.service; (2) Issue this command: sudo systemctl daemon-reload. (3) Then try running ${script_name} again."
+        "/etc/systemd/system/roonserver.service; (2) Issue this command: sudo systemctl daemon-reload. (3) Then run ${script_name} again."
 fi
 
-if [[ -f "${roon_server_root}/check.sh" ]] && "${roon_server_root}/check.sh"; then
+if [[ -f "${roon_serverroot}/check.sh" ]] && "${roon_serverroot}/check.sh"; then
 
-    note "Uninstalling Roon Server at '${roon_server_root}'"
-    
-    systemctl stop roonserver
-    rm --recursive --dir "${roon_server_root}"
+    note "Uninstalling Roon Server at '${roon_serverroot}'"
+    trap on_error_or_interrupt ERR SIGINT SIGKILL SIGTERM
+
+    systemctl stop roonserver | true
+    rm --recursive --dir "${roon_serverroot}"
     rm $(readlink --canonicalize-existing /etc/systemd/system/roonserver.service) /etc/systemd/system/roonserver.service
 
     if [[ remove_data == true ]]; then
-        note "Removing Roon data at '${roon_dataroot}'"
-        rm --recursive --dir "${roon_dataroot}"
+        note "Removing Roon data on '${roon_dataroot}'"
+        rm --recursive --dir "${roon_dataroot}/*"
     fi
     
-    note "Complete."
+    note "Completed."
 else
-    error 1 \
-        "The check for a runnable instance of Roon Server at '$roon_server_root' failed. To resolve the issue, check" \
-        "the values of the Roon Server environment variables by running this command: sudo systemctl show roonserver" \
-        "--propert=Environment. Troubleshoot from there."
+    note "Failed: The check for a runnable instance of Roon Server at '$roon_serverroot' failed. To resolve the issue, verify" \
+        "the Roon Server environment by running this command: sudo systemctl show roonserver --propert=Environment." \
+        "Troubleshoot from there."
 fi
